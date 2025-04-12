@@ -2,17 +2,20 @@
  * @Date: 2025-04-12 10:45:19
  * @Description:
  */
-import { ErrorInfo, useState } from "react";
+import { ErrorInfo, useEffect, useState } from "react";
 import reactLogo from "./assets/react.svg";
 import viteLogo from "/vite.svg";
 import MyErrorBoundary from "../../react-hand-write/component/ErrorBoundary";
 import { useErrorBoundary } from "react-error-boundary";
+import useLastest from '../../react-hand-write/hook/useLatest'
 import "./App.css";
 
 function InnerApp() {
   const [count, setCount] = useState(0);
   const { showBoundary } = useErrorBoundary();
-
+  // 测试useLatest
+  const latestCount = useLastest(count);
+  // 测试ErrorBoundary
   const handleClick = () => {
     if (count === 4) {
       showBoundary(new Error("我是一个测试错误！"));
@@ -20,6 +23,16 @@ function InnerApp() {
     }
     setCount(count + 1);
   };
+
+  // 测试闭包
+  useEffect(()=>{
+    const interval = setInterval(() => {
+      console.log(`Current count: ${count}`);
+      // setCount(count + 1); // This always increments from original count value
+      setCount(latestCount.current+1) // This will set the latest value
+    }, 1000);
+    return () => clearInterval(interval);
+  },[])
 
   return (
     <div>
@@ -34,13 +47,10 @@ function InnerApp() {
       <h1>Vite + React</h1>
       <div className="card">
         <button onClick={handleClick}>count is {count}</button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
       </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
+      <div>
+        测试闭包问题
+      </div>
     </div>
   );
 }
