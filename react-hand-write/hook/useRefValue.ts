@@ -1,14 +1,16 @@
 /*
- * @Date: 2025-04-12 16:49:28
- * @Description: 封装最新的ref解决闭包问题
+ * @Date: 2025-04-12 16:58:10
+ * @Description: 
  */
-import { useRef } from "react";
+import { useRef } from 'react'
 
-// 封装一个useRef,
-function useLastest<T>(initialValue: T): { current: T } {
-  const ref = useRef<T>(initialValue);
-  ref.current = initialValue;
-  return ref;
+// @see https://react.dev/reference/react/useRef#avoiding-recreating-the-ref-contents
+export const useRefValue = <T>(value: () => T): T => {
+  const ref = useRef<T>()
+
+  if (!ref.current) {
+    ref.current = value()
+  }
+
+  return ref.current!
 }
-
-export default useLastest;
