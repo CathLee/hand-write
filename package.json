@@ -1,5 +1,30 @@
 {
+  "name": "root",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter ./playground/ dev",
+    "dev:playground": "pnpm --filter ./playground/ dev",
+    "build:playground": "pnpm --filter ./playground build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^8.56.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "eslint": "^8.56.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "globals": "^13.24.0",
+    "typescript": "~5.0.4"
+  },
   "dependencies": {
-    "react": "^18.2.0"
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.35",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-error-boundary": "^4.0.12",
+    "tailwindcss": "^3.4.1"
   }
 }
