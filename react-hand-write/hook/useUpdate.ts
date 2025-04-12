@@ -1,10 +1,14 @@
+/*
+ * @Date: 2025-04-02 22:11:21
+ * @Description: 
+ */
 
 import { useRef,useState ,useCallback,useEffect,} from 'react';
 
 // 封装一个useRef
 function useLastest<T>(initialValue: T): { current: T } {
   const ref = useRef<T>(initialValue);
-  ref.value = initialValue
+  ref.current = initialValue
   return ref;
 }
 
