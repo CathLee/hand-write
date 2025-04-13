@@ -7,7 +7,7 @@ import reactLogo from "./assets/react.svg";
 import viteLogo from "/vite.svg";
 import MyErrorBoundary from "../../react-hand-write/component/ErrorBoundary";
 import { useErrorBoundary } from "react-error-boundary";
-import useLastest from '../../react-hand-write/hook/useLatest'
+import useLastest from '../../react-hand-write/hook/useLastest'
 import "./App.css";
 
 function InnerApp() {
