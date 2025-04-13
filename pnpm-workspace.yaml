@@ -1,3 +1,4 @@
 packages:
   - 'playground'
+  - 'vue-playground/base'
   - 'react-hand-write' 

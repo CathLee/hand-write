@@ -1,4 +1,4 @@
-./node_modules
 ./playground/node_modules
+./vue-playground/base/node_modules
 node_modules
-node_modules
+
