@@ -33,3 +33,41 @@ function isPalindrome(head: ListNode | null): boolean {
 };
 
 // 2.快慢指针
+// tips:
+// 1.findMid找到中间头，快慢指针找，快的走两格，慢的走一格
+// 2.找到中间头进行翻转，形成链表head2
+// 3.比对head和head2的每个元素是否一致
+function findMid(head) {
+    let fast = head
+    let slow = head
+    while (fast && fast.next) {
+        slow = slow.next
+        fast = fast.next.next
+    }
+    return slow
+}
+
+function reverse(head){
+    let pre = null
+    let cur = head
+    while (cur) {
+        let temp = cur.next
+        cur.next = pre
+        pre = cur
+        cur = temp
+    }
+    return pre
+}
+
+function isPalindrome(head: ListNode | null): boolean {
+    const mid = findMid(head)
+    let head2 = reverse(mid)
+    while(head2){
+        if(head.val!==head2.val){
+            return false
+        }
+        head = head.next
+        head2 = head2.next
+    }
+    return true
+};
