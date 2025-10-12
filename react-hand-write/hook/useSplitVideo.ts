@@ -2,8 +2,8 @@
  * @Date: 2025-10-10 22:40:52
  * @Description:
  */
-import { useCallback, useRef, useState,useEffect } from "react";
-import { MD5WorkerPool } from '../worker/workpool';
+import { useCallback, useRef, useState, useEffect } from "react";
+import { MD5WorkerPool } from "../worker/workpool";
 
 export interface ChunkInfo {
   index: number;
@@ -34,6 +34,7 @@ export interface UploadResult {
   md5: string;
 }
 type UploadStatus =
+  | "cancelled"
   | "idle"
   | "preparing"
   | "checking"
@@ -62,7 +63,7 @@ const useSplitVideo = (config: UploadConfig = {}) => {
     chunkSize = 10 * 1024 * 1024,
     concurrentLimit = 3,
     maxRetries = 3,
-    serverUrl = '/api',
+    serverUrl = "/api",
     workerPoolSize = 2, // 默认2个Worker
     onProgress,
     onMD5Progress,
@@ -71,6 +72,9 @@ const useSplitVideo = (config: UploadConfig = {}) => {
     onError,
     onStatusChange,
   } = config;
+
+  console.log(serverUrl);
+  
 
   // Worker Pool引用
   const workerPoolRef = useRef<MD5WorkerPool | null>(null);
@@ -81,6 +85,8 @@ const useSplitVideo = (config: UploadConfig = {}) => {
   const currentFileRef = useRef<File | null>(null);
 
   // 状态管理
+
+  const [uploadedChunks, setUploadedChunks] = useState<Set<number>>(new Set());
   const [md5Progress, setMd5Progress] = useState<number>(0);
   const [isPaused, setIsPaused] = useState(false);
   const [error, setError] = useState<string>("");
@@ -97,7 +103,7 @@ const useSplitVideo = (config: UploadConfig = {}) => {
     currentPhase: "preparing",
   });
 
-// 初始化Worker Pool（只初始化一次）
+  // 初始化Worker Pool（只初始化一次）
   useEffect(() => {
     workerPoolRef.current = new MD5WorkerPool(workerPoolSize);
 
@@ -106,9 +112,21 @@ const useSplitVideo = (config: UploadConfig = {}) => {
     return () => {
       // 组件卸载时销毁Worker Pool
       workerPoolRef.current?.destroy();
-      console.log('🗑️ Worker Pool已销毁');
+      console.log("🗑️ Worker Pool已销毁");
     };
   }, [workerPoolSize]);
+
+  // 计算剩余时间
+  const calculateRemainingTime = (prog: UploadProgress): number => {
+    const speed = prog.uploadSpeed;
+    if (speed === 0) return 0;
+    return (prog.totalBytes - prog.uploadedBytes) / (speed * 1024 * 1024);
+  };
+  // 计算上传速度
+  const calculateUploadSpeed = (uploadedBytes: number): number => {
+    const elapsed = (Date.now() - startTimeRef.current) / 1000;
+    return elapsed > 0 ? uploadedBytes / elapsed / (1024 * 1024) : 0;
+  };
 
   // 使用Worker Pool计算文件MD5
   const calculateFileMD5 = useCallback(
@@ -149,6 +167,209 @@ const useSplitVideo = (config: UploadConfig = {}) => {
     [chunkSize]
   );
 
+  // 上传单个分片（带进度）
+  const uploadChunk = useCallback(
+    async (chunk: ChunkInfo, fileId: string): Promise<void> => {
+      const formData = new FormData();
+      formData.append("file", chunk.blob);
+      formData.append("fileId", fileId);
+      formData.append("chunkIndex", chunk.index.toString());
+
+      const abortController = new AbortController();
+      abortControllersRef.current.set(chunk.index, abortController);
+
+      for (let i = 0; i <= maxRetries; i++) {
+        try {
+          if (isPaused) {
+            throw new Error("上传已暂停");
+          }
+
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                const chunkProgress = (event.loaded / event.total) * 100;
+                chunk.uploadProgress = chunkProgress;
+                onChunkProgress?.(chunk.index, chunkProgress);
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                  const data = JSON.parse(xhr.responseText);
+                  if (data.success) {
+                    resolve();
+                  } else {
+                    reject(new Error(data.message || "上传失败"));
+                  }
+                } catch (err) {
+                  reject(new Error("解析响应失败"));
+                }
+              } else {
+                reject(new Error(`服务器错误: ${xhr.status}`));
+              }
+            };
+
+            xhr.onerror = () => reject(new Error("网络错误"));
+            xhr.onabort = () => reject(new Error("上传已中断"));
+
+            abortController.signal.addEventListener("abort", () => {
+              xhr.abort();
+            });
+
+            // 将 fileId 和 chunkIndex 作为 query 参数传递（因为 multer 在处理文件时 req.body 还未解析）
+            xhr.open("POST", `${serverUrl}/upload/chunk?fileId=${encodeURIComponent(fileId)}&chunkIndex=${chunk.index}`);
+            xhr.send(formData);
+          });
+
+          setUploadedChunks((prev) => new Set(prev).add(chunk.index));
+          setProgress((prev) => {
+            const newProgress = {
+              ...prev,
+              uploadedBytes: prev.uploadedBytes + chunk.size,
+              uploadedChunks: prev.uploadedChunks + 1,
+              currentPhase: "uploading" as const,
+            };
+            newProgress.percentage =
+              (newProgress.uploadedBytes / newProgress.totalBytes) * 100;
+            newProgress.uploadSpeed = calculateUploadSpeed(
+              newProgress.uploadedBytes
+            );
+            newProgress.remainingTime = calculateRemainingTime(newProgress);
+
+            onProgress?.(newProgress);
+            return newProgress;
+          });
+
+          abortControllersRef.current.delete(chunk.index);
+          return;
+        } catch (err) {
+          if (err instanceof Error && err.message === "上传已中断") {
+            throw err;
+          }
+
+          if (i === maxRetries) {
+            throw err;
+          }
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.pow(2, i) * 1000)
+          );
+        }
+      }
+    },
+    [serverUrl, maxRetries, isPaused, onProgress, onChunkProgress]
+  );
+  // 秒传检查
+  const checkSecondaryUpload = useCallback(
+    async (fileMD5: string, filename: string): Promise<boolean> => {
+      try {
+        const response = await fetch(`${serverUrl}/upload/check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileMD5, filename }),
+        });
+        const data = await response.json();
+        if (data.exists) {
+          onComplete?.({
+            success: true,
+            fileId: fileMD5,
+            filename,
+            filepath: data.path,
+            size: 0,
+            md5: fileMD5,
+          });
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.error("秒传检查失败:", err);
+        return false;
+      }
+    },
+    [serverUrl, onComplete]
+  );
+
+  // 查询已上传的分片
+  const checkUploadedChunks = useCallback(
+    async (fileId: string): Promise<number[]> => {
+      try {
+        const response = await fetch(`${serverUrl}/upload/chunks/${fileId}`);
+        const data = await response.json();
+        return data.chunks || [];
+      } catch (err) {
+        console.error("查询已上传分片失败:", err);
+        return [];
+      }
+    },
+    [serverUrl]
+  );
+
+  // 合并分片
+  const mergeChunks = useCallback(
+    async (
+      fileId: string,
+      totalChunks: number,
+      filename: string
+    ): Promise<UploadResult> => {
+      setStatus("merging");
+      setProgress((prev) => ({ ...prev, currentPhase: "merging" }));
+
+      try {
+        const response = await fetch(`${serverUrl}/upload/merge`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId, totalChunks, filename }),
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          const result: UploadResult = {
+            success: true,
+            fileId,
+            filename,
+            filepath: data.path,
+            size: data.size,
+            md5: data.md5,
+          };
+          onComplete?.(result);
+          setStatus("completed");
+          return result;
+        } else {
+          throw new Error(data.message || "合并失败");
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "合并分片失败";
+        setError(errorMsg);
+        setStatus("error");
+        onError?.(new Error(errorMsg));
+        throw err;
+      }
+    },
+    [serverUrl, onComplete, onError]
+  );
+
+  // 并发上传控制
+  const uploadChunksWithLimit = useCallback(
+    async (chunks: ChunkInfo[], fileId: string): Promise<void> => {
+      const queue = chunks.filter((c) => !uploadedChunks.has(c.index));
+      const uploading: Promise<void>[] = [];
+      while (queue.length > 0 || uploading.length > 0) {
+        // 暂停上传
+        if (isPaused) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          continue;
+        }
+
+        while (uploading.length < concurrentLimit && queue.length > 0) {
+          const chunk = queue.shift()!;
+          const uploadPromise = uploadChunk(chunk, fileId);
+        }
+      }
+    },
+    []
+  );
   // 上传文件
   const uploadFile = useCallback(
     async (file: File): Promise<UploadResult | null> => {
@@ -173,16 +394,70 @@ const useSplitVideo = (config: UploadConfig = {}) => {
           .substr(2, 9)}`;
 
         // 计算MD5（使用Worker Pool）
-        setStatus("calculating-md5");
-        console.log("🔐 开始计算MD5，使用Worker Pool...");
-        const fileMD5 = await calculateFileMD5(file);
-        console.log("✅ MD5计算完成:", fileMD5);
-      } catch (error) {}
+        // TODO: 暂时跳过 MD5 计算，因为 Worker Pool 尚未完全实现
+        // setStatus("calculating-md5");
+        // console.log("🔐 开始计算MD5，使用Worker Pool...");
+        // const fileMD5 = await calculateFileMD5(file);
+        // console.log("✅ MD5计算完成:", fileMD5);
+        const fileMD5 = "mock-md5-" + Date.now(); // 临时使用 mock MD5
+        console.log("⚠️ 使用 Mock MD5:", fileMD5);
+
+        // 秒传检查（略过，假设文件不存在）
+        // 秒传检查
+        setStatus("checking");
+        const isSecondaryUpload = await checkSecondaryUpload(
+          fileMD5,
+          file.name
+        );
+        if (isSecondaryUpload) {
+          setStatus("completed");
+          setIsUploading(false);
+          return null;
+        }
+        // 分片处理
+        setStatus("preparing");
+        const chunks = chunkFile(file);
+        chunksRef.current = chunks;
+        setProgress((prev) => ({
+          ...prev,
+          totalChunks: chunks.length,
+          uploadedChunks: 0,
+          currentPhase: "uploading",
+        }));
+
+        // 查询已上传的分片（断点续传）
+        const uploaded = await checkUploadedChunks(fileIdRef.current);
+        setUploadedChunks(new Set(uploaded));
+        // 并发上传分片
+        setStatus("uploading");
+        await uploadChunksWithLimit(chunks, fileIdRef.current);
+        // 合并分片
+        const result = await mergeChunks(
+          fileIdRef.current,
+          chunks.length,
+          file.name
+        );
+        setIsUploading(false);
+        return result;
+      } catch (err) {
+        if (err instanceof Error && err.message === "MD5计算已中断") {
+          setStatus("cancelled");
+          setError("上传已取消");
+        } else {
+          const errorMsg = err instanceof Error ? err.message : "上传失败";
+          setError(errorMsg);
+          setStatus("error");
+          onError?.(new Error(errorMsg));
+        }
+        setIsUploading(false);
+        return null;
+      }
     },
-    []
+    [calculateFileMD5, chunkFile, onError]
   );
 
   return {
+    uploadFile,
     chunkFile,
   };
 };

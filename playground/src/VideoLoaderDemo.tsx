@@ -5,13 +5,21 @@
 import React, { useRef, useState, useEffect } from "react";
 import useVideoLoader from "../../react-hand-write/hook/useVideoLoader";
 import useVideoAnalysis from "../../react-hand-write/hook/useVideoAnalysis";
-
+import useSplitVideo from "../../react-hand-write/hook/useSplitVideo";
 const VideoLoaderDemo: React.FC = () => {
+  const currentFileRef = useRef<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<"load" | "analysis" | "split">(
     "load"
   );
+  
+  const {
+    uploadFile
+  } = useSplitVideo({
+    serverUrl: 'http://localhost:3001/api',
+    // ... 其他配置
+  });
 
   const {
     isLoading,
@@ -53,6 +61,8 @@ const VideoLoaderDemo: React.FC = () => {
   // 处理文件选择
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    // 分片上传的ref
+    currentFileRef.current = file || null;
     if (file) {
       loadVideo(file);
     }
@@ -112,6 +122,12 @@ const VideoLoaderDemo: React.FC = () => {
     }
     return `${minutes}:${secs.toString().padStart(2, "0")}`;
   };
+
+  // 大视频控制
+  const handleStartUpload = async () => {
+    console.log("大视频分片上传控制");
+    await uploadFile(currentFileRef.current!);
+  }
 
   return (
     <div style={{ padding: "20px", maxWidth: "1000px", margin: "0 auto" }}>
@@ -747,8 +763,19 @@ const VideoLoaderDemo: React.FC = () => {
         </div>
       )}
       {activeTab === "split" && (
+        
+        
+
+
         <div>
-          大视频分片
+
+          <div>button控制
+
+          <button onClick={handleStartUpload}>控制</button>
+
+          </div>
+          <div>
+            大视频分片
           {videoElement && (
             <div
               style={{
@@ -812,6 +839,7 @@ const VideoLoaderDemo: React.FC = () => {
               </div>
             </div>
           )}
+          </div>
         </div>
       )}
     </div>
