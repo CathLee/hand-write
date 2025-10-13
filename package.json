@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "pnpm --filter ./playground/ dev",
+    "server": "pnpm --filter ./playground/ server",
     "dev:playground": "pnpm --filter ./playground/ dev",
     "build:playground": "pnpm --filter ./playground build"
   },
