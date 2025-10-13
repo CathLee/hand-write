@@ -394,13 +394,13 @@ const useSplitVideo = (config: UploadConfig = {}) => {
           .substr(2, 9)}`;
 
         // 计算MD5（使用Worker Pool）
-        // TODO: 暂时跳过 MD5 计算，因为 Worker Pool 尚未完全实现
-        // setStatus("calculating-md5");
-        // console.log("🔐 开始计算MD5，使用Worker Pool...");
-        // const fileMD5 = await calculateFileMD5(file);
-        // console.log("✅ MD5计算完成:", fileMD5);
-        const fileMD5 = "mock-md5-" + Date.now(); // 临时使用 mock MD5
-        console.log("⚠️ 使用 Mock MD5:", fileMD5);
+        setStatus("calculating-md5");
+        console.log("🔐 开始计算MD5，使用Worker Pool...");
+        const fileMD5 = await calculateFileMD5(file);
+        console.log(fileMD5);
+        
+        console.log("✅ MD5计算完成:", fileMD5);
+      
 
         // 秒传检查（略过，假设文件不存在）
         // 秒传检查
