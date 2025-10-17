@@ -106,9 +106,7 @@ const useSplitVideo = (config: UploadConfig = {}) => {
   // 初始化Worker Pool（只初始化一次）
   useEffect(() => {
     workerPoolRef.current = new MD5WorkerPool(workerPoolSize);
-
     console.log(`✅ Worker Pool已初始化，大小: ${workerPoolSize}`);
-
     return () => {
       // 组件卸载时销毁Worker Pool
       workerPoolRef.current?.destroy();
@@ -134,9 +132,7 @@ const useSplitVideo = (config: UploadConfig = {}) => {
       if (!workerPoolRef.current) {
         throw new Error("Worker Pool未初始化");
       }
-
       console.log("📊 Worker Pool状态:", workerPoolRef.current.getStatus());
-
       // 使用Worker Pool计算MD5
       return workerPoolRef.current.calculateMD5(file, (progress) => {
         setMd5Progress(progress);
@@ -224,7 +220,7 @@ const useSplitVideo = (config: UploadConfig = {}) => {
             xhr.send(formData);
           });
 
-          setUploadedChunks((prev) => new Set(prev).add(chunk.index));
+          setUploadedChunks((prev) => new Set([...prev, chunk.index]));
           setProgress((prev) => {
             const newProgress = {
               ...prev,
@@ -354,21 +350,42 @@ const useSplitVideo = (config: UploadConfig = {}) => {
   const uploadChunksWithLimit = useCallback(
     async (chunks: ChunkInfo[], fileId: string): Promise<void> => {
       const queue = chunks.filter((c) => !uploadedChunks.has(c.index));
-      const uploading: Promise<void>[] = [];
-      while (queue.length > 0 || uploading.length > 0) {
+      const uploading = new Map<number, Promise<void>>();
+
+      while (queue.length > 0 || uploading.size > 0) {
         // 暂停上传
         if (isPaused) {
           await new Promise((resolve) => setTimeout(resolve, 500));
           continue;
         }
 
-        while (uploading.length < concurrentLimit && queue.length > 0) {
+        // 启动新的上传任务
+        while (uploading.size < concurrentLimit && queue.length > 0) {
           const chunk = queue.shift()!;
-          const uploadPromise = uploadChunk(chunk, fileId);
+          const uploadPromise = uploadChunk(chunk, fileId)
+            .catch((err) => {
+              console.error(`分片 ${chunk.index} 上传失败:`, err);
+              // 重新加入队列（如果还有重试次数）
+              if (chunk.retries < maxRetries) {
+                chunk.retries++;
+                queue.push(chunk);
+              } else {
+                throw err;
+              }
+            })
+            .finally(() => {
+              uploading.delete(chunk.index);
+            });
+          uploading.set(chunk.index, uploadPromise);
+        }
+
+        // 等待至少一个上传完成
+        if (uploading.size > 0) {
+          await Promise.race(Array.from(uploading.values()));
         }
       }
     },
-    []
+    [uploadedChunks, isPaused, concurrentLimit, uploadChunk, maxRetries]
   );
   // 上传文件
   const uploadFile = useCallback(
@@ -456,9 +473,61 @@ const useSplitVideo = (config: UploadConfig = {}) => {
     [calculateFileMD5, chunkFile, onError]
   );
 
+  // 暂停上传
+  const pauseUpload = useCallback(() => {
+    setIsPaused(true);
+    setStatus("paused");
+    onStatusChange?.("paused");
+  }, [onStatusChange]);
+
+  // 恢复上传
+  const resumeUpload = useCallback(() => {
+    setIsPaused(false);
+    setStatus("uploading");
+    onStatusChange?.("uploading");
+  }, [onStatusChange]);
+
+  // 取消上传
+  const cancelUpload = useCallback(() => {
+    // 中止所有正在进行的上传
+    abortControllersRef.current.forEach((controller) => {
+      controller.abort();
+    });
+    abortControllersRef.current.clear();
+
+    // 清空 Worker Pool
+    workerPoolRef.current?.clear();
+
+    setStatus("cancelled");
+    setIsUploading(false);
+    setError("上传已取消");
+    onStatusChange?.("cancelled");
+  }, [onStatusChange]);
+
+  // 组件卸载时清理
+  useEffect(() => {
+    return () => {
+      // 取消所有正在进行的上传
+      abortControllersRef.current.forEach((controller) => {
+        controller.abort();
+      });
+      abortControllersRef.current.clear();
+    };
+  }, []);
+
   return {
     uploadFile,
     chunkFile,
+    pauseUpload,
+    resumeUpload,
+    cancelUpload,
+    // 状态
+    status,
+    progress,
+    md5Progress,
+    isPaused,
+    isUploading,
+    error,
   };
 };
 
