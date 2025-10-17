@@ -15,10 +15,38 @@ const VideoLoaderDemo: React.FC = () => {
   );
   
   const {
-    uploadFile
+    uploadFile,
+    pauseUpload,
+    resumeUpload,
+    cancelUpload,
+    status: uploadStatus,
+    progress: uploadProgress,
+    md5Progress,
+    isPaused,
+    isUploading,
+    error: uploadError,
   } = useSplitVideo({
-    serverUrl: 'http://localhost:3001/api',
+    serverUrl: "http://localhost:3001/api",
     // ... 其他配置
+    chunkSize: 10 * 1024 * 1024, // 10MB
+    concurrentLimit: 3,
+    maxRetries: 3,
+    workerPoolSize: 2,
+    onProgress: (progress) => {
+      console.log("上传进度:", progress);
+    },
+    onMD5Progress: (progress) => {
+      console.log("MD5计算进度:", progress + "%");
+    },
+    onComplete: (result) => {
+      console.log("上传完成:", result);
+    },
+    onError: (error) => {
+      console.error("上传错误:", error);
+    },
+    onStatusChange: (status) => {
+      console.log("状态变化:", status);
+    },
   });
 
   const {
@@ -763,19 +791,340 @@ const VideoLoaderDemo: React.FC = () => {
         </div>
       )}
       {activeTab === "split" && (
-        
-        
-
-
         <div>
+          {/* 上传控制面板 */}
+          <div
+            style={{
+              marginBottom: "20px",
+              padding: "15px",
+              border: "1px solid #ddd",
+              borderRadius: "8px",
+            }}
+          >
+            <h3>📤 大视频分片上传控制</h3>
 
-          <div>button控制
+            {!currentFileRef.current && (
+              <p style={{ color: "#666", fontSize: "14px", marginBottom: "15px" }}>
+                ⚠️ 请先在"视频加载"标签页中选择视频文件
+              </p>
+            )}
 
-          <button onClick={handleStartUpload}>控制</button>
+            <div style={{ marginBottom: "15px" }}>
+              <button
+                onClick={handleStartUpload}
+                disabled={!currentFileRef.current || isUploading}
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor:
+                    currentFileRef.current && !isUploading ? "#34c759" : "#ccc",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor:
+                    currentFileRef.current && !isUploading ? "pointer" : "not-allowed",
+                  marginRight: "10px",
+                }}
+              >
+                {uploadStatus === "idle" ? "开始上传" : "重新上传"}
+              </button>
 
+              <button
+                onClick={isPaused ? resumeUpload : pauseUpload}
+                disabled={!isUploading || uploadStatus === "calculating-md5" || uploadStatus === "merging"}
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: isUploading && uploadStatus === "uploading" ? "#ff9500" : "#ccc",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor:
+                    isUploading && uploadStatus === "uploading" ? "pointer" : "not-allowed",
+                  marginRight: "10px",
+                }}
+              >
+                {isPaused ? "继续上传" : "暂停上传"}
+              </button>
+
+              <button
+                onClick={cancelUpload}
+                disabled={!isUploading}
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: isUploading ? "#ff3b30" : "#ccc",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: isUploading ? "pointer" : "not-allowed",
+                }}
+              >
+                取消上传
+              </button>
+            </div>
+
+            {/* 状态指示 */}
+            <div style={{ fontSize: "14px", color: "#666" }}>
+              <strong>当前状态：</strong>
+              <span
+                style={{
+                  marginLeft: "10px",
+                  color:
+                    uploadStatus === "completed"
+                      ? "#34c759"
+                      : uploadStatus === "error" || uploadStatus === "cancelled"
+                      ? "#ff3b30"
+                      : uploadStatus === "uploading"
+                      ? "#007acc"
+                      : uploadStatus === "paused"
+                      ? "#ff9500"
+                      : "#666",
+                }}
+              >
+                {uploadStatus === "idle" && "待上传"}
+                {uploadStatus === "preparing" && "准备中..."}
+                {uploadStatus === "calculating-md5" && "计算MD5中..."}
+                {uploadStatus === "checking" && "秒传检查中..."}
+                {uploadStatus === "uploading" && (isPaused ? "已暂停" : "上传中...")}
+                {uploadStatus === "paused" && "已暂停"}
+                {uploadStatus === "merging" && "合并分片中..."}
+                {uploadStatus === "completed" && "✅ 上传完成"}
+                {uploadStatus === "error" && "❌ 上传失败"}
+                {uploadStatus === "cancelled" && "🚫 已取消"}
+              </span>
+            </div>
           </div>
-          <div>
-            大视频分片
+
+          {/* MD5 计算进度 */}
+          {uploadStatus === "calculating-md5" && (
+            <div
+              style={{
+                marginBottom: "20px",
+                padding: "15px",
+                border: "1px solid #ddd",
+                borderRadius: "8px",
+              }}
+            >
+              <h3>🔐 MD5 计算进度 (Worker Pool)</h3>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  marginBottom: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    height: "15px",
+                    backgroundColor: "#f0f0f0",
+                    borderRadius: "7px",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${md5Progress}%`,
+                      height: "100%",
+                      backgroundColor: "#ff9500",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+                <span style={{ marginLeft: "15px", minWidth: "60px" }}>
+                  {md5Progress.toFixed(1)}%
+                </span>
+              </div>
+              <p style={{ fontSize: "14px", color: "#666", margin: "5px 0 0 0" }}>
+                💡 使用 Worker Pool 在后台线程计算文件哈希，不会阻塞 UI
+              </p>
+            </div>
+          )}
+
+          {/* 上传进度详情 */}
+          {(uploadStatus === "uploading" || uploadStatus === "paused") && (
+            <div
+              style={{
+                marginBottom: "20px",
+                padding: "15px",
+                border: "1px solid #ddd",
+                borderRadius: "8px",
+              }}
+            >
+              <h3>📊 上传进度</h3>
+
+              {/* 总进度条 */}
+              <div style={{ marginBottom: "20px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: "5px",
+                  }}
+                >
+                  <span style={{ fontSize: "14px", fontWeight: "bold" }}>
+                    总体进度
+                  </span>
+                  <span style={{ fontSize: "14px", fontWeight: "bold" }}>
+                    {uploadProgress.percentage.toFixed(1)}%
+                  </span>
+                </div>
+                <div
+                  style={{
+                    width: "100%",
+                    height: "20px",
+                    backgroundColor: "#f0f0f0",
+                    borderRadius: "10px",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${uploadProgress.percentage}%`,
+                      height: "100%",
+                      backgroundColor: isPaused ? "#ff9500" : "#34c759",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* 详细信息网格 */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr",
+                  gap: "10px",
+                  fontSize: "14px",
+                }}
+              >
+                <span>已上传：</span>
+                <span>
+                  {formatFileSize(uploadProgress.uploadedBytes)} /{" "}
+                  {formatFileSize(uploadProgress.totalBytes)}
+                </span>
+
+                <span>分片进度：</span>
+                <span>
+                  {uploadProgress.uploadedChunks} / {uploadProgress.totalChunks} 个分片
+                </span>
+
+                <span>上传速度：</span>
+                <span
+                  style={{
+                    color: uploadProgress.uploadSpeed > 0 ? "#34c759" : "#666",
+                  }}
+                >
+                  {uploadProgress.uploadSpeed.toFixed(2)} MB/s
+                </span>
+
+                <span>剩余时间：</span>
+                <span>
+                  {uploadProgress.remainingTime > 0
+                    ? `约 ${Math.ceil(uploadProgress.remainingTime)} 秒`
+                    : "计算中..."}
+                </span>
+
+                <span>当前阶段：</span>
+                <span style={{ color: "#007acc" }}>
+                  {uploadProgress.currentPhase === "preparing" && "准备中"}
+                  {uploadProgress.currentPhase === "calculating-md5" && "计算MD5"}
+                  {uploadProgress.currentPhase === "uploading" && "上传分片"}
+                  {uploadProgress.currentPhase === "merging" && "合并文件"}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 合并进度 */}
+          {uploadStatus === "merging" && (
+            <div
+              style={{
+                marginBottom: "20px",
+                padding: "15px",
+                border: "1px solid #ddd",
+                borderRadius: "8px",
+              }}
+            >
+              <h3>🔄 正在合并分片...</h3>
+              <p style={{ fontSize: "14px", color: "#666" }}>
+                所有分片已上传完成，服务器正在合并文件，请稍候...
+              </p>
+              <div
+                style={{
+                  width: "100%",
+                  height: "10px",
+                  backgroundColor: "#f0f0f0",
+                  borderRadius: "5px",
+                  overflow: "hidden",
+                  marginTop: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    backgroundColor: "#007acc",
+                    animation: "pulse 1.5s ease-in-out infinite",
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 错误信息 */}
+          {uploadError && (
+            <div
+              style={{
+                marginBottom: "20px",
+                padding: "15px",
+                border: "1px solid #ff3b30",
+                borderRadius: "8px",
+                backgroundColor: "#fff5f5",
+              }}
+            >
+              <h3 style={{ color: "#ff3b30", marginBottom: "10px" }}>
+                ❌ 上传错误
+              </h3>
+              <p style={{ fontSize: "14px", color: "#666", margin: 0 }}>
+                {uploadError}
+              </p>
+            </div>
+          )}
+
+          {/* 上传成功提示 */}
+          {uploadStatus === "completed" && (
+            <div
+              style={{
+                marginBottom: "20px",
+                padding: "15px",
+                border: "1px solid #34c759",
+                borderRadius: "8px",
+                backgroundColor: "#f0fff4",
+              }}
+            >
+              <h3 style={{ color: "#34c759", marginBottom: "10px" }}>
+                ✅ 上传成功！
+              </h3>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr",
+                  gap: "10px",
+                  fontSize: "14px",
+                }}
+              >
+                <span>文件大小：</span>
+                <span>{formatFileSize(uploadProgress.totalBytes)}</span>
+
+                <span>总分片数：</span>
+                <span>{uploadProgress.totalChunks} 个</span>
+
+                <span>平均速度：</span>
+                <span>{uploadProgress.uploadSpeed.toFixed(2)} MB/s</span>
+              </div>
+            </div>
+          )}
+
+          {/* 视频预览 */}
           {videoElement && (
             <div
               style={{
@@ -785,7 +1134,7 @@ const VideoLoaderDemo: React.FC = () => {
                 borderRadius: "8px",
               }}
             >
-              <h3>视频预览</h3>
+              <h3>🎬 视频预览</h3>
               <video
                 controls
                 style={{ width: "100%", maxWidth: "500px", height: "auto" }}
@@ -793,53 +1142,57 @@ const VideoLoaderDemo: React.FC = () => {
               >
                 您的浏览器不支持视频播放。
               </video>
-
-              {/* 分析提示 */}
-              <div
-                style={{
-                  marginTop: "15px",
-                  padding: "10px",
-                  backgroundColor: "#e8f4ff",
-                  borderRadius: "5px",
-                  border: "1px solid #007acc",
-                }}
-              >
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "10px" }}
-                >
-                  <span style={{ fontSize: "20px" }}>🧠</span>
-                  <div>
-                    <strong>视频已就绪！</strong>
-                    <p
-                      style={{
-                        margin: "5px 0 0 0",
-                        fontSize: "14px",
-                        color: "#555",
-                      }}
-                    >
-                      现在可以使用 AI
-                      分析功能了，切换到"视频分析"标签页开始智能分析
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setActiveTab("analysis")}
-                    style={{
-                      padding: "8px 15px",
-                      backgroundColor: "#007acc",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                    }}
-                  >
-                    立即分析
-                  </button>
-                </div>
-              </div>
             </div>
           )}
+
+          {/* WebWorker 功能说明 */}
+          <div
+            style={{
+              marginTop: "30px",
+              padding: "15px",
+              backgroundColor: "#f8f9fa",
+              borderRadius: "8px",
+            }}
+          >
+            <h3>⚡ WebWorker 分片上传功能</h3>
+            <ul>
+              <li>
+                <strong>Worker Pool MD5计算：</strong>
+                使用多个 Worker 并行计算文件哈希，不阻塞主线程
+              </li>
+              <li>
+                <strong>智能分片：</strong>自动将大文件切分为 10MB 的分片
+              </li>
+              <li>
+                <strong>并发上传：</strong>同时上传多个分片（默认3个并发）
+              </li>
+              <li>
+                <strong>断点续传：</strong>支持暂停/继续上传，已上传分片会被记录
+              </li>
+              <li>
+                <strong>秒传检测：</strong>通过 MD5 检测文件是否已存在，避免重复上传
+              </li>
+              <li>
+                <strong>自动重试：</strong>失败的分片会自动重试（最多3次）
+              </li>
+              <li>
+                <strong>实时进度：</strong>显示上传速度、剩余时间、分片进度等详细信息
+              </li>
+            </ul>
+            <p style={{ fontSize: "14px", color: "#666", marginTop: "10px" }}>
+              💡 这个演示展示了如何使用 WebWorker Pool 进行大文件的分片上传，
+              实现了 MD5 计算、断点续传、并发控制等完整的上传解决方案。
+            </p>
           </div>
+
+          <style>
+            {`
+              @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+              }
+            `}
+          </style>
         </div>
       )}
     </div>
